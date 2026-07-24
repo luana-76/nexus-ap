@@ -1,0 +1,121 @@
+name: Nexus API CI/CD
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+
+  # ============================================================
+  # FASE 1 — Validam segurança e estrutura do código.
+  # Não dependem de nada, rodam em paralelo assim que a pipeline inicia.
+  # ============================================================
+
+  sast:
+    name: SAST (Análise de Segurança Estática)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run npm audit (vulnerabilidades conhecidas)
+        run: npm audit --audit-level=high
+
+  build:
+    name: Build (Instalação e integridade do código)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Verify syntax of entry point and source files
+        run: |
+          node --check index.js
+          for f in $(find src -name "*.js"); do node --check "$f"; done
+
+  # ============================================================
+  # FASE 2 — Só rodam se a Fase 1 (sast + build) passar.
+  # ============================================================
+
+  test:
+    name: Testes Unitários (Jest)
+    runs-on: ubuntu-latest
+    needs: [sast, build]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Unit Tests
+        run: npm test
+
+  lint-quality:
+    name: Qualidade de Código (Lint)
+    runs-on: ubuntu-latest
+    needs: [sast, build]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Run Lint
+        run: npm run lint
+
+  # ============================================================
+  # FASE 3 — Só roda se TODOS os testes unitários passarem
+  # e o código estiver limpo no Lint (Fail Fast em ação).
+  # ============================================================
+
+  api-tests:
+    name: API E2E Tests (Curl)
+    runs-on: ubuntu-latest
+    needs: [test, lint-quality]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Start API
+        run: npm start &
+
+      - name: Run API Tests (Smoke, Sanity, Regression)
+        run: bash scripts/api-tests.sh
